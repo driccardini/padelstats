@@ -190,6 +190,21 @@ def inject_court_styles() -> None:
                 margin-bottom: 4px;
             }
 
+            .match-toolbar {
+                margin-bottom: 12px;
+                border: 2px solid rgba(255, 255, 255, 0.85);
+                border-radius: 14px;
+                background: rgba(12, 69, 42, 0.58);
+                padding: 10px;
+            }
+
+            .match-meta {
+                color: #ffffff;
+                text-align: center;
+                font-weight: 700;
+                margin-bottom: 8px;
+            }
+
             [data-testid="stMetric"] {
                 background: rgba(255, 255, 255, 0.1);
                 border: 1px solid rgba(255, 255, 255, 0.45);
@@ -241,6 +256,17 @@ def inject_court_styles() -> None:
                 min-height: 44px;
             }
 
+            [data-testid="stButton"] > button[data-testid^="baseButton-secondary"][kind="secondary"] {
+                letter-spacing: 0.02em;
+            }
+
+            [data-testid="stButton"] > button p {
+                color: #000000;
+                font-weight: 800;
+                font-size: 1.45rem;
+                font-family: "Arial", "Helvetica", sans-serif;
+            }
+
             @media (max-width: 900px) {
                 .player-name {
                     font-size: 1.05rem;
@@ -279,6 +305,12 @@ def ensure_state() -> None:
 
     if "last_saved_set" not in st.session_state:
         st.session_state.last_saved_set = None
+
+    if "active_quadrant" not in st.session_state:
+        st.session_state.active_quadrant = "q1"
+
+    if "match_view" not in st.session_state:
+        st.session_state.match_view = "Mobile"
 
     if "stats" not in st.session_state:
         st.session_state.stats = {
@@ -566,7 +598,7 @@ def render_quadrant(quadrant: str) -> None:
         c1, c2, c3 = st.columns([1, 2, 1])
         with c1:
             st.button(
-                "-",
+                "−",
                 key=f"dec_{quadrant}_{stat}_{set_number}",
                 on_click=dec_stat,
                 args=(quadrant, stat),
@@ -584,7 +616,7 @@ def render_quadrant(quadrant: str) -> None:
             )
         with c3:
             st.button(
-                "+",
+                "＋",
                 key=f"inc_{quadrant}_{stat}_{set_number}",
                 on_click=inc_stat,
                 args=(quadrant, stat),
@@ -623,6 +655,118 @@ def render_saved_set_summary(set_number: int) -> None:
             st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_mobile_player_selector() -> None:
+    st.markdown('<div class="summary-wrap">', unsafe_allow_html=True)
+    st.markdown('<div class="summary-title">Jugador activo</div>', unsafe_allow_html=True)
+
+    q1, q2 = st.columns(2)
+    with q1:
+        if st.button(
+            st.session_state.player_names["q1"],
+            key="active_q1",
+            type="primary" if st.session_state.active_quadrant == "q1" else "secondary",
+            use_container_width=True,
+        ):
+            st.session_state.active_quadrant = "q1"
+            st.rerun()
+    with q2:
+        if st.button(
+            st.session_state.player_names["q2"],
+            key="active_q2",
+            type="primary" if st.session_state.active_quadrant == "q2" else "secondary",
+            use_container_width=True,
+        ):
+            st.session_state.active_quadrant = "q2"
+            st.rerun()
+
+    q3, q4 = st.columns(2)
+    with q3:
+        if st.button(
+            st.session_state.player_names["q3"],
+            key="active_q3",
+            type="primary" if st.session_state.active_quadrant == "q3" else "secondary",
+            use_container_width=True,
+        ):
+            st.session_state.active_quadrant = "q3"
+            st.rerun()
+    with q4:
+        if st.button(
+            st.session_state.player_names["q4"],
+            key="active_q4",
+            type="primary" if st.session_state.active_quadrant == "q4" else "secondary",
+            use_container_width=True,
+        ):
+            st.session_state.active_quadrant = "q4"
+            st.rerun()
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_match_toolbar() -> None:
+    st.markdown('<div class="match-toolbar">', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="match-meta">{st.session_state.match_name} | ID: {st.session_state.match_id}</div>',
+        unsafe_allow_html=True,
+    )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.selectbox("Set activo", options=[1, 2, 3], key="selected_set")
+    with c2:
+        st.radio("Vista", options=["Mobile", "Cancha"], key="match_view", horizontal=True)
+
+    c3, c4 = st.columns(2)
+    with c3:
+        if st.button("Reset set actual", use_container_width=True):
+            reset_set_stats(st.session_state.selected_set)
+            st.success("Set reseteado")
+    with c4:
+        if st.button("Guardar set en Google Sheets", type="primary", use_container_width=True):
+            ok, msg = save_set_to_google_sheet(st.session_state.selected_set)
+            if ok:
+                st.session_state.last_saved_set = st.session_state.selected_set
+                st.success(msg)
+            else:
+                st.error(msg)
+
+    c5, c6 = st.columns(2)
+    with c5:
+        if st.button("Reset partido completo", use_container_width=True):
+            reset_match_stats()
+            st.success("Partido reseteado")
+    with c6:
+        if st.button("Finalizar partido", use_container_width=True):
+            finish_match()
+            st.rerun()
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_court_view() -> None:
+    st.markdown('<div class="court-board">', unsafe_allow_html=True)
+
+    top_left, top_right = st.columns(2)
+    with top_left:
+        render_quadrant("q1")
+    with top_right:
+        render_quadrant("q2")
+
+    st.markdown('<div class="court-midline"></div>', unsafe_allow_html=True)
+
+    bottom_left, bottom_right = st.columns(2)
+    with bottom_left:
+        render_quadrant("q3")
+    with bottom_right:
+        render_quadrant("q4")
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_mobile_view() -> None:
+    render_mobile_player_selector()
+    render_quadrant(st.session_state.active_quadrant)
 
 
 def render_player_summary_card(quadrant: str) -> None:
@@ -716,49 +860,12 @@ def render_match_screen() -> None:
         unsafe_allow_html=True,
     )
 
-    with st.sidebar:
-        st.subheader("Partido en juego")
-        st.write(f"ID: {st.session_state.match_id}")
-        st.write(f"Partido: {st.session_state.match_name}")
-        st.selectbox("Set activo", options=[1, 2, 3], key="selected_set")
+    render_match_toolbar()
 
-        if st.button("Reset set actual", use_container_width=True):
-            reset_set_stats(st.session_state.selected_set)
-            st.success("Set reseteado")
-
-        if st.button("Reset partido completo", use_container_width=True):
-            reset_match_stats()
-            st.success("Partido reseteado")
-
-        if st.button("Guardar set en Google Sheets", type="primary", use_container_width=True):
-            ok, msg = save_set_to_google_sheet(st.session_state.selected_set)
-            if ok:
-                st.session_state.last_saved_set = st.session_state.selected_set
-                st.success(msg)
-            else:
-                st.error(msg)
-
-        if st.button("Finalizar partido", use_container_width=True):
-            finish_match()
-            st.rerun()
-
-    st.markdown('<div class="court-board">', unsafe_allow_html=True)
-
-    top_left, top_right = st.columns(2)
-    with top_left:
-        render_quadrant("q1")
-    with top_right:
-        render_quadrant("q2")
-
-    st.markdown('<div class="court-midline"></div>', unsafe_allow_html=True)
-
-    bottom_left, bottom_right = st.columns(2)
-    with bottom_left:
-        render_quadrant("q3")
-    with bottom_right:
-        render_quadrant("q4")
-
-    st.markdown("</div>", unsafe_allow_html=True)
+    if st.session_state.match_view == "Mobile":
+        render_mobile_view()
+    else:
+        render_court_view()
 
     if st.session_state.last_saved_set:
         render_saved_set_summary(st.session_state.last_saved_set)
