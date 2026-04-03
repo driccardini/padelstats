@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 from typing import Dict
 from uuid import uuid4
 
@@ -451,9 +452,42 @@ def get_service_account_info() -> Dict | None:
         "token_uri",
     }
 
+    info = None
+
+    # 1) Streamlit secrets
     try:
         info = dict(st.secrets["gcp_service_account"])
     except (StreamlitSecretNotFoundError, KeyError):
+        info = None
+
+    # 2) Environment variable fallback with JSON blob
+    if info is None:
+        raw_json = os.getenv("GCP_SERVICE_ACCOUNT_JSON", "").strip()
+        if raw_json:
+            try:
+                info = json.loads(raw_json)
+            except Exception:
+                info = None
+
+    # 3) Direct parse of local/user secrets.toml
+    if info is None and toml is not None:
+        candidate_paths = [
+            os.path.join(os.getcwd(), ".streamlit", "secrets.toml"),
+            os.path.join(os.path.expanduser("~"), ".streamlit", "secrets.toml"),
+        ]
+        for path in candidate_paths:
+            if not os.path.exists(path):
+                continue
+            try:
+                parsed = toml.load(path)
+                section = parsed.get("gcp_service_account")
+                if isinstance(section, dict):
+                    info = dict(section)
+                    break
+            except Exception:
+                continue
+
+    if info is None:
         return None
 
     if not required_keys.issubset(set(info.keys())):
