@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+import time
 from pathlib import Path
 from typing import Dict
 from uuid import uuid4
@@ -303,7 +304,7 @@ def inject_court_styles() -> None:
 
 def ensure_state() -> None:
     if "screen" not in st.session_state:
-        st.session_state.screen = "setup"
+        st.session_state.screen = "home"
 
     if "match_id" not in st.session_state:
         st.session_state.match_id = f"M-{uuid4().hex[:8].upper()}"
@@ -331,6 +332,12 @@ def ensure_state() -> None:
     if "match_view" not in st.session_state:
         st.session_state.match_view = "Mobile"
 
+    if "autosave_signatures" not in st.session_state:
+        st.session_state.autosave_signatures = {}
+
+    if "autosave_last_tick" not in st.session_state:
+        st.session_state.autosave_last_tick = 0.0
+
     if "stats" not in st.session_state:
         st.session_state.stats = {
             set_number: {
@@ -351,6 +358,9 @@ def ensure_state() -> None:
         st.session_state.setup_player_q3 = ""
     if "setup_player_q4" not in st.session_state:
         st.session_state.setup_player_q4 = ""
+
+    if "current_tab" not in st.session_state:
+        st.session_state.current_tab = "Nuevo Partido"
 
 
 def inc_stat(quadrant: str, stat_key: str) -> None:
@@ -601,7 +611,35 @@ def save_set_to_google_sheet(set_number: int) -> tuple[bool, str]:
             worksheet = spreadsheet.sheet1
 
         row = to_sheet_row_for_set(set_number)
-        worksheet.append_row(row, value_input_option="RAW")
+
+        # Upsert por Partido + Set: actualiza la fila existente si ya está.
+        all_values = worksheet.get_all_values()
+        target_match = str(st.session_state.match_name).strip()
+        target_set = f"SET {set_number}"
+        target_row_index = None
+
+        for idx, existing in enumerate(all_values, start=1):
+            if len(existing) < 2:
+                continue
+            col_match = str(existing[0]).strip()
+            col_set = str(existing[1]).strip()
+
+            # Salta encabezado típico.
+            if idx == 1 and col_match.lower() == "partido" and col_set.lower() == "set":
+                continue
+
+            if col_match == target_match and col_set == target_set:
+                target_row_index = idx
+                break
+
+        if target_row_index is not None:
+            worksheet.update(
+                f"A{target_row_index}:V{target_row_index}",
+                [row],
+                value_input_option="RAW",
+            )
+        else:
+            worksheet.append_row(row, value_input_option="RAW")
     except Exception as exc:
         return False, f"Error guardando en Google Sheets: {exc}"
 
@@ -611,7 +649,33 @@ def save_set_to_google_sheet(set_number: int) -> tuple[bool, str]:
             f"Set {set_number} guardado en Google Sheets (pestaña configurada no existe, se usó {worksheet.title})",
         )
 
-    return True, f"Set {set_number} guardado en Google Sheets (1 fila)"
+    if target_row_index is not None:
+        return True, f"Set {set_number} actualizado en Google Sheets (fila {target_row_index})"
+
+    return True, f"Set {set_number} guardado en Google Sheets (nueva fila)"
+
+
+def build_set_signature(set_number: int) -> tuple:
+    values = []
+    for quadrant in ["q1", "q2", "q3", "q4"]:
+        values.append(st.session_state.player_names[quadrant])
+        for stat in STAT_KEYS:
+            values.append(st.session_state.stats[set_number][quadrant][stat])
+    return (st.session_state.match_name, set_number, *values)
+
+
+def run_silent_autosave() -> None:
+    # No muestra mensajes en UI. Guarda solo si cambió el set activo.
+    set_number = st.session_state.selected_set
+    signature = build_set_signature(set_number)
+    saved_signature = st.session_state.autosave_signatures.get(set_number)
+    if signature == saved_signature:
+        return
+
+    ok, _ = save_set_to_google_sheet(set_number)
+    if ok:
+        st.session_state.autosave_signatures[set_number] = signature
+    st.session_state.autosave_last_tick = time.time()
 
 
 def start_match() -> tuple[bool, str]:
@@ -801,6 +865,9 @@ def render_match_toolbar() -> None:
             ok, msg = save_set_to_google_sheet(st.session_state.selected_set)
             if ok:
                 st.session_state.last_saved_set = st.session_state.selected_set
+                st.session_state.autosave_signatures[st.session_state.selected_set] = build_set_signature(
+                    st.session_state.selected_set
+                )
                 st.success(msg)
             else:
                 st.warning(msg)
@@ -916,14 +983,20 @@ def render_setup_screen() -> None:
         st.text_input("Jugador cuadrante inferior izquierdo", key="setup_player_q3", placeholder="Jugador 3")
         st.text_input("Jugador cuadrante inferior derecho", key="setup_player_q4", placeholder="Jugador 4")
 
-        submitted = st.form_submit_button("Iniciar partido", type="primary")
-        if submitted:
-            ok, msg = start_match()
-            if ok:
-                st.success(msg)
+        col1, col2 = st.columns(2)
+        with col1:
+            submitted = st.form_submit_button("Iniciar partido", type="primary", use_container_width=True)
+            if submitted:
+                ok, msg = start_match()
+                if ok:
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.error(msg)
+        with col2:
+            if st.form_submit_button("Cancelar", use_container_width=True):
+                st.session_state.screen = "home"
                 st.rerun()
-            else:
-                st.error(msg)
 
 
 def render_match_screen() -> None:
@@ -935,6 +1008,15 @@ def render_match_screen() -> None:
     )
 
     render_match_toolbar()
+
+    if hasattr(st, "fragment"):
+
+        @st.fragment(run_every="10s")
+        def autosave_fragment() -> None:
+            if st.session_state.screen == "match":
+                run_silent_autosave()
+
+        autosave_fragment()
 
     if st.session_state.match_view == "Mobile":
         render_mobile_view()
@@ -970,7 +1052,7 @@ def render_summary_screen() -> None:
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
     with c1:
         if st.button("Volver al partido", use_container_width=True):
             st.session_state.screen = "match"
@@ -979,16 +1061,323 @@ def render_summary_screen() -> None:
         if st.button("Nuevo partido", type="primary", use_container_width=True):
             start_new_match()
             st.rerun()
+    with c3:
+        if st.button("🏠 Inicio", use_container_width=True):
+            st.session_state.screen = "home"
+            st.rerun()
+
+
+def fetch_all_matches_from_sheet() -> list[dict] | None:
+    """Trae todos los partidos guardados en Google Sheets."""
+    if gspread is None or Credentials is None:
+        return None
+
+    sheet_id = resolve_google_sheet_id()
+    if not sheet_id:
+        return None
+
+    service_account_info = get_service_account_info()
+    if not service_account_info:
+        return None
+
+    valid, _ = validate_service_account_info(service_account_info)
+    if not valid:
+        return None
+
+    try:
+        scope = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ]
+        credentials = Credentials.from_service_account_info(service_account_info, scopes=scope)
+        client = gspread.authorize(credentials)
+
+        spreadsheet = client.open_by_key(sheet_id)
+        try:
+            worksheet_name = st.secrets["google_worksheet"]
+        except (StreamlitSecretNotFoundError, KeyError):
+            worksheet_name = None
+
+        if worksheet_name:
+            try:
+                worksheet = spreadsheet.worksheet(worksheet_name)
+            except gspread.WorksheetNotFound:
+                worksheet = spreadsheet.sheet1
+        else:
+            worksheet = spreadsheet.sheet1
+
+        all_values = worksheet.get_all_values()
+        if not all_values:
+            return []
+
+        # Estructura esperada basada en to_sheet_row_for_set
+        # [Partido, Set, j1, j2, j3, j4, q1_winner, q1_error, q1_smash, q1_smash_w, q2_winner, ...]
+        matches_dict = {}
+
+        for row_idx, row in enumerate(all_values):
+            if row_idx == 0:  # Skip header
+                continue
+            if len(row) < 6:
+                continue
+
+            match_name = row[0].strip()
+            set_label = row[1].strip()
+
+            if match_name not in matches_dict:
+                matches_dict[match_name] = {
+                    "name": match_name,
+                    "sets": {},
+                    "players": [row[2].strip(), row[3].strip(), row[4].strip(), row[5].strip()],
+                    "row_index": row_idx,
+                }
+
+            # Parsear estadísticas por jugador para este set
+            set_data = {
+                "set_label": set_label,
+                "players": [row[2].strip(), row[3].strip(), row[4].strip(), row[5].strip()],
+                "stats": {},
+                "row_index": row_idx,
+            }
+
+            # q1 = columnas 6-9, q2 = 10-13, q3 = 14-17, q4 = 18-21
+            quadrants = ["q1", "q2", "q3", "q4"]
+            stat_indices = [
+                [6, 7, 8, 9],
+                [10, 11, 12, 13],
+                [14, 15, 16, 17],
+                [18, 19, 20, 21],
+            ]
+
+            for q_idx, (quad, indices) in enumerate(zip(quadrants, stat_indices)):
+                set_data["stats"][quad] = {
+                    "winner": int(row[indices[0]]) if indices[0] < len(row) and row[indices[0]].isdigit() else 0,
+                    "errores_no_forzados": int(row[indices[1]]) if indices[1] < len(row) and row[indices[1]].isdigit() else 0,
+                    "smash": int(row[indices[2]]) if indices[2] < len(row) and row[indices[2]].isdigit() else 0,
+                    "smash_winner": int(row[indices[3]]) if indices[3] < len(row) and row[indices[3]].isdigit() else 0,
+                }
+
+            matches_dict[match_name]["sets"][set_label] = set_data
+
+        return list(matches_dict.values())
+
+    except Exception:
+        return None
+
+
+def calculate_player_performance(match: dict) -> dict:
+    """Calcula puntuación de rendimiento por jugador para el MVP."""
+    player_scores = {}
+    for player in match["players"]:
+        player_scores[player] = 0
+
+    # Sumar estadísticas de todos los sets
+    for set_label, set_data in match["sets"].items():
+        for q_idx, quadrant in enumerate(["q1", "q2", "q3", "q4"]):
+            player = set_data["players"][q_idx]
+            stats = set_data["stats"][quadrant]
+            
+            # Scoring: Winners +3, Smash Winners +2, Smash +1, Errors -1
+            score = (stats["winner"] * 3 + 
+                    stats["smash_winner"] * 2 + 
+                    stats["smash"] * 1 - 
+                    stats["errores_no_forzados"] * 1)
+            player_scores[player] += score
+
+    return player_scores
+
+
+def render_history_screen() -> None:
+    """Pantalla de histórico de partidos con opción de ver MVP."""
+    inject_court_styles()
+    st.markdown('<div class="court-title">📊 Histórico de Partidos</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="court-subtitle">Todas tus partidas y estadísticas en detalle</div>',
+        unsafe_allow_html=True,
+    )
+
+    matches = fetch_all_matches_from_sheet()
+
+    if matches is None:
+        st.error("❌ No se pudieron cargar los partidos. Verifica tu conexión a Google Sheets.")
+        return
+
+    if not matches:
+        st.info("📭 No hay partidos guardados aún. ¡Crea uno nuevo para comenzar!")
+        if st.button("Crear nuevo partido", type="primary"):
+            st.session_state.screen = "setup"
+            st.rerun()
+        return
+
+    # Mostrar lista de partidos
+    st.subheader(f"📈 Total de partidos: {len(matches)}")
+
+    for match in reversed(matches):  # Mostrar más recientes primero
+        player_scores = calculate_player_performance(match)
+        best_player = max(player_scores, key=player_scores.get)
+        
+        with st.expander(f"🎾 {match['name']} | {len(match['sets'])} sets", expanded=False):
+            # Encabezado del partido
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                st.markdown("**👥 Jugadores:**")
+                for player in match["players"]:
+                    emoji = "⭐" if player == best_player else "  "
+                    st.text(f"{emoji} {player}")
+
+            with col2:
+                st.markdown("**⚙️ Información:**")
+                st.text(f"Sets: {len(match['sets'])}")
+                st.text(f"Puntos totales: {sum(player_scores.values())}")
+
+            with col3:
+                st.markdown("**🏆 MVP Estimado:**")
+                st.markdown(f"### {best_player}")
+                st.text(f"Pts: {player_scores[best_player]}")
+
+            st.divider()
+
+            # Mostrar estadísticas por set
+            for set_label, set_data in sorted(match["sets"].items()):
+                st.markdown(f"### {set_label} 🎯")
+
+                # Crear tabla de estadísticas con más iconos
+                table_data = []
+                for q_idx, quadrant in enumerate(["q1", "q2", "q3", "q4"]):
+                    stats = set_data["stats"][quadrant]
+                    player = set_data["players"][q_idx]
+                    
+                    # Calcular total de esta jugada en este set
+                    total_score = (stats["winner"] * 3 + 
+                                 stats["smash_winner"] * 2 + 
+                                 stats["smash"] * 1)
+                    
+                    table_data.append({
+                        "👤 Jugador": player,
+                        "🎯 Winners": f"{stats['winner']} 🎯",
+                        "⚠️ Errores": f"{stats['errores_no_forzados']} ⚠️",
+                        "💥 Smash": f"{stats['smash']} 💥",
+                        "🔥 Smash W": f"{stats['smash_winner']} 🔥",
+                    })
+
+                st.dataframe(table_data, use_container_width=True, hide_index=True)
+                st.markdown("---")
+
+            # Opción para seleccionar MVP del partido
+            st.markdown("### 🏆 Designar MVP del Partido")
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                mvp_player = st.selectbox(
+                    "Selecciona el MVP:",
+                    options=match["players"] + ["Sin designar"],
+                    key=f"mvp_{match['name']}",
+                    index=match["players"].index(best_player) if best_player in match["players"] else len(match["players"]),
+                )
+            with col2:
+                if st.button(
+                    "💾 Guardar",
+                    key=f"save_mvp_{match['name']}",
+                    use_container_width=True,
+                ):
+                    if mvp_player == "Sin designar":
+                        st.info("ℹ️ MVP no designado")
+                    else:
+                        st.success(f"✅ {mvp_player} es el MVP de {match['name']}")
+
+    st.divider()
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("➕ Crear nuevo partido", type="primary", use_container_width=True):
+            st.session_state.screen = "setup"
+            st.rerun()
+
+    with col2:
+        if st.button("🏠 Volver al inicio", use_container_width=True):
+            st.session_state.screen = "home"
+            st.rerun()
+
+
+def render_home_screen() -> None:
+    """Pantalla de inicio principal con opciones para nuevo partido o histórico."""
+    inject_court_styles()
+    
+    st.markdown('<div class="court-title">🎾 Padel Stats</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="court-subtitle">Gestor de estadísticas de partidos de pádel</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Mostrar dos opciones principais
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown(
+            """
+            <div style="
+                background: rgba(21, 92, 58, 0.62);
+                border: 2px solid rgba(255, 255, 255, 0.9);
+                border-radius: 14px;
+                padding: 30px;
+                text-align: center;
+                box-shadow: 0 6px 22px rgba(0, 0, 0, 0.18);
+            ">
+                <div style="font-size: 3em;">➕</div>
+                <div style="color: #f7fff9; font-weight: 700; font-size: 1.3em; margin: 15px 0;">
+                    Nuevo Partido
+                </div>
+                <div style="color: #d8f2e3; font-size: 0.95em;">
+                    Comienza a registrar estadísticas de un nuevo encuentro
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button("Iniciar", key="btn_new_match", use_container_width=True, type="primary"):
+            st.session_state.screen = "setup"
+            st.rerun()
+
+    with col2:
+        st.markdown(
+            """
+            <div style="
+                background: rgba(21, 92, 58, 0.62);
+                border: 2px solid rgba(255, 255, 255, 0.9);
+                border-radius: 14px;
+                padding: 30px;
+                text-align: center;
+                box-shadow: 0 6px 22px rgba(0, 0, 0, 0.18);
+            ">
+                <div style="font-size: 3em;">📊</div>
+                <div style="color: #f7fff9; font-weight: 700; font-size: 1.3em; margin: 15px 0;">
+                    Histórico
+                </div>
+                <div style="color: #d8f2e3; font-size: 0.95em;">
+                    Visualiza todos tus partidos anteriores y estadísticas
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button("Ver", key="btn_history", use_container_width=True, type="primary"):
+            st.session_state.screen = "history"
+            st.rerun()
 
 
 def main() -> None:
     st.set_page_config(page_title="Padel Stats", page_icon="🎾", layout="wide")
     ensure_state()
 
-    if st.session_state.screen == "setup":
+    if st.session_state.screen == "home":
+        render_home_screen()
+    elif st.session_state.screen == "setup":
         render_setup_screen()
     elif st.session_state.screen == "match":
         render_match_screen()
+    elif st.session_state.screen == "history":
+        render_history_screen()
     else:
         render_summary_screen()
 
