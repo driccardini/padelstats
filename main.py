@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+from pathlib import Path
 from typing import Dict
 from uuid import uuid4
 
@@ -37,6 +38,15 @@ STAT_ICONS = {
 }
 
 DEFAULT_GOOGLE_SHEET_ID = "1tcyldrxv5lZl2CKaK4-1Me73IasGlLWTVK7cuup9HRY"
+
+
+def get_candidate_secret_paths() -> list[str]:
+    project_root = Path(__file__).resolve().parent
+    return [
+        str(project_root / ".streamlit" / "secrets.toml"),
+        str(Path.cwd() / ".streamlit" / "secrets.toml"),
+        str(Path.home() / ".streamlit" / "secrets.toml"),
+    ]
 
 
 def inject_court_styles() -> None:
@@ -471,11 +481,7 @@ def get_service_account_info() -> Dict | None:
 
     # 3) Direct parse of local/user secrets.toml
     if info is None and toml is not None:
-        candidate_paths = [
-            os.path.join(os.getcwd(), ".streamlit", "secrets.toml"),
-            os.path.join(os.path.expanduser("~"), ".streamlit", "secrets.toml"),
-        ]
-        for path in candidate_paths:
+        for path in get_candidate_secret_paths():
             if not os.path.exists(path):
                 continue
             try:
@@ -536,11 +542,7 @@ def resolve_google_sheet_id() -> str | None:
 
     # 3) Direct parse of local/user secrets.toml
     if toml is not None:
-        candidate_paths = [
-            os.path.join(os.getcwd(), ".streamlit", "secrets.toml"),
-            os.path.join(os.path.expanduser("~"), ".streamlit", "secrets.toml"),
-        ]
-        for path in candidate_paths:
+        for path in get_candidate_secret_paths():
             if not os.path.exists(path):
                 continue
             try:
@@ -565,9 +567,10 @@ def save_set_to_google_sheet(set_number: int) -> tuple[bool, str]:
 
     service_account_info = get_service_account_info()
     if not service_account_info:
+        checked_paths = ", ".join(get_candidate_secret_paths())
         return (
             False,
-            "Falta gcp_service_account en .streamlit/secrets.toml",
+            f"Falta gcp_service_account. Rutas buscadas: {checked_paths}",
         )
 
     valid, validation_message = validate_service_account_info(service_account_info)
@@ -794,13 +797,13 @@ def render_match_toolbar() -> None:
             reset_set_stats(st.session_state.selected_set)
             st.success("Set reseteado")
     with c4:
-        if st.button("Guardar set en Google Sheets", type="primary", use_container_width=True):
+        if st.button("Guardar set en Google Sheets", use_container_width=True):
             ok, msg = save_set_to_google_sheet(st.session_state.selected_set)
             if ok:
                 st.session_state.last_saved_set = st.session_state.selected_set
                 st.success(msg)
             else:
-                st.error(msg)
+                st.warning(msg)
 
     c5, c6 = st.columns(2)
     with c5:
