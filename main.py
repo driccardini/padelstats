@@ -35,6 +35,8 @@ STAT_ICONS = {
     "smash_winner": "🔥",
 }
 
+DEFAULT_GOOGLE_SHEET_ID = "1tcyldrxv5lZl2CKaK4-1Me73IasGlLWTVK7cuup9HRY"
+
 
 def inject_court_styles() -> None:
     st.markdown(
@@ -498,19 +500,25 @@ def resolve_google_sheet_id() -> str | None:
     if env_value:
         return env_value
 
-    # 3) Direct parse of local .streamlit/secrets.toml
+    # 3) Direct parse of local/user secrets.toml
     if toml is not None:
-        local_path = os.path.join(os.getcwd(), ".streamlit", "secrets.toml")
-        if os.path.exists(local_path):
+        candidate_paths = [
+            os.path.join(os.getcwd(), ".streamlit", "secrets.toml"),
+            os.path.join(os.path.expanduser("~"), ".streamlit", "secrets.toml"),
+        ]
+        for path in candidate_paths:
+            if not os.path.exists(path):
+                continue
             try:
-                parsed = toml.load(local_path)
+                parsed = toml.load(path)
                 parsed_value = str(parsed.get("google_sheet_id", "")).strip()
                 if parsed_value:
                     return parsed_value
             except Exception:
-                return None
+                continue
 
-    return None
+    # 4) Project default fallback for this app.
+    return DEFAULT_GOOGLE_SHEET_ID
 
 
 def save_set_to_google_sheet(set_number: int) -> tuple[bool, str]:
@@ -519,10 +527,7 @@ def save_set_to_google_sheet(set_number: int) -> tuple[bool, str]:
 
     sheet_id = resolve_google_sheet_id()
     if not sheet_id:
-        return (
-            False,
-            "Falta configurar secret: google_sheet_id (tambien podes usar env GOOGLE_SHEET_ID)",
-        )
+        return (False, "No se pudo resolver google_sheet_id")
 
     service_account_info = get_service_account_info()
     if not service_account_info:
