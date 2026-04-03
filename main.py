@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import os
 from typing import Dict
 from uuid import uuid4
 
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
+
+try:
+    import toml
+except Exception:  # pragma: no cover - optional fallback parser
+    toml = None
 
 try:
     import gspread
@@ -478,19 +484,45 @@ def validate_service_account_info(info: Dict) -> tuple[bool, str]:
     return True, "ok"
 
 
+def resolve_google_sheet_id() -> str | None:
+    # 1) Streamlit secrets
+    try:
+        value = st.secrets["google_sheet_id"]
+        if str(value).strip():
+            return str(value).strip()
+    except (StreamlitSecretNotFoundError, KeyError):
+        pass
+
+    # 2) Environment variable fallback
+    env_value = os.getenv("GOOGLE_SHEET_ID", "").strip()
+    if env_value:
+        return env_value
+
+    # 3) Direct parse of local .streamlit/secrets.toml
+    if toml is not None:
+        local_path = os.path.join(os.getcwd(), ".streamlit", "secrets.toml")
+        if os.path.exists(local_path):
+            try:
+                parsed = toml.load(local_path)
+                parsed_value = str(parsed.get("google_sheet_id", "")).strip()
+                if parsed_value:
+                    return parsed_value
+            except Exception:
+                return None
+
+    return None
+
+
 def save_set_to_google_sheet(set_number: int) -> tuple[bool, str]:
     if gspread is None or Credentials is None:
         return False, "Faltan dependencias. Instalá primero con: uv sync"
 
-    try:
-        sheet_id = st.secrets["google_sheet_id"]
-    except StreamlitSecretNotFoundError:
+    sheet_id = resolve_google_sheet_id()
+    if not sheet_id:
         return (
             False,
-            "No existe .streamlit/secrets.toml. Crealo con google_sheet_id y gcp_service_account.",
+            "Falta configurar secret: google_sheet_id (tambien podes usar env GOOGLE_SHEET_ID)",
         )
-    except KeyError:
-        return (False, "Falta configurar secret: google_sheet_id")
 
     service_account_info = get_service_account_info()
     if not service_account_info:
