@@ -17,6 +17,7 @@ App pensada para usar desde celular durante un partido de padel.
 - Estadísticas separadas por set (1, 2 y 3).
 - Guardado del set activo en Google Sheets.
 - Guardado opcional del partido completo (sets 1, 2 y 3) en Google Sheets.
+- Agenda de partidos próximos, cargados desde el home o desde Google Sheets.
 
 ### Ejecutar local
 
@@ -55,6 +56,23 @@ token_uri = "https://oauth2.googleapis.com/token"
 ```
 
 También tenés que compartir la hoja con el `client_email` de la service account.
+
+### Agenda de partidos próximos
+
+Desde el home podés abrir `Agregar partido a la agenda` y cargar fecha, hora,
+nombre, los 4 jugadores y notas. La app guarda esos datos en una pestaña
+separada llamada `Partidos` y permite cargar cualquier partido directamente en
+la pantalla de setup.
+
+También podés crear esa pestaña manualmente y pegar una fila por partido con
+estos encabezados exactos:
+
+```text
+ID | Fecha | Hora | Partido | Jugador #1 | Jugador #2 | Jugador #3 | Jugador #4 | Estado | Notas
+```
+
+`ID` puede ser cualquier identificador único y `Estado` puede comenzar como
+`Pendiente`.
 
 ### Columnas reales usadas en la hoja
 

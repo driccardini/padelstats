@@ -39,6 +39,19 @@ STAT_ICONS = {
 }
 
 DEFAULT_GOOGLE_SHEET_ID = "1tcyldrxv5lZl2CKaK4-1Me73IasGlLWTVK7cuup9HRY"
+SCHEDULED_MATCHES_WORKSHEET = "Partidos"
+SCHEDULED_MATCH_HEADERS = [
+    "ID",
+    "Fecha",
+    "Hora",
+    "Partido",
+    "Jugador #1",
+    "Jugador #2",
+    "Jugador #3",
+    "Jugador #4",
+    "Estado",
+    "Notas",
+]
 
 
 def get_candidate_secret_paths() -> list[str]:
@@ -417,6 +430,19 @@ def ensure_state() -> None:
     if "confirm_clear_match" not in st.session_state:
         st.session_state.confirm_clear_match = False
 
+    if "scheduled_date" not in st.session_state:
+        st.session_state.scheduled_date = ""
+    if "scheduled_time" not in st.session_state:
+        st.session_state.scheduled_time = ""
+    if "scheduled_match_name" not in st.session_state:
+        st.session_state.scheduled_match_name = ""
+    for quadrant in ["q1", "q2", "q3", "q4"]:
+        key = f"scheduled_player_{quadrant}"
+        if key not in st.session_state:
+            st.session_state[key] = ""
+    if "scheduled_notes" not in st.session_state:
+        st.session_state.scheduled_notes = ""
+
 
 def inc_stat(quadrant: str, stat_key: str) -> None:
     current_set = st.session_state.selected_set
@@ -596,6 +622,109 @@ def validate_service_account_info(info: Dict) -> tuple[bool, str]:
         return False, "private_key no tiene formato PEM válido."
 
     return True, "ok"
+
+
+def get_google_spreadsheet():
+    if gspread is None or Credentials is None:
+        return None
+
+    sheet_id = resolve_google_sheet_id()
+    service_account_info = get_service_account_info()
+    if not sheet_id or not service_account_info:
+        return None
+
+    valid, _ = validate_service_account_info(service_account_info)
+    if not valid:
+        return None
+
+    scope = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    credentials = Credentials.from_service_account_info(service_account_info, scopes=scope)
+    client = gspread.authorize(credentials)
+    return client.open_by_key(sheet_id)
+
+
+def get_scheduled_matches_worksheet():
+    spreadsheet = get_google_spreadsheet()
+    if spreadsheet is None:
+        return None
+
+    try:
+        worksheet = spreadsheet.worksheet(SCHEDULED_MATCHES_WORKSHEET)
+    except gspread.WorksheetNotFound:
+        worksheet = spreadsheet.add_worksheet(
+            title=SCHEDULED_MATCHES_WORKSHEET,
+            rows=1000,
+            cols=len(SCHEDULED_MATCH_HEADERS),
+        )
+        worksheet.append_row(SCHEDULED_MATCH_HEADERS, value_input_option="RAW")
+        return worksheet
+
+    if not worksheet.get_all_values():
+        worksheet.append_row(SCHEDULED_MATCH_HEADERS, value_input_option="RAW")
+    return worksheet
+
+
+def fetch_scheduled_matches() -> list[dict] | None:
+    try:
+        worksheet = get_scheduled_matches_worksheet()
+        if worksheet is None:
+            return None
+
+        rows = worksheet.get_all_records()
+        matches = []
+        for row_index, row in enumerate(rows, start=2):
+            match_name = str(row.get("Partido", "")).strip()
+            if not match_name:
+                continue
+            matches.append(
+                {
+                    "row_index": row_index,
+                    "id": str(row.get("ID", "")).strip(),
+                    "date": str(row.get("Fecha", "")).strip(),
+                    "time": str(row.get("Hora", "")).strip(),
+                    "name": match_name,
+                    "players": [
+                        str(row.get(f"Jugador #{index}", "")).strip()
+                        for index in range(1, 5)
+                    ],
+                    "status": str(row.get("Estado", "Pendiente")).strip() or "Pendiente",
+                    "notes": str(row.get("Notas", "")).strip(),
+                }
+            )
+        return matches
+    except Exception:
+        return None
+
+
+def save_scheduled_match(match: dict) -> tuple[bool, str]:
+    try:
+        worksheet = get_scheduled_matches_worksheet()
+        if worksheet is None:
+            return False, "No se pudo conectar con Google Sheets."
+
+        row = [
+            match["id"],
+            match["date"],
+            match["time"],
+            match["name"],
+            *match["players"],
+            match.get("status", "Pendiente"),
+            match.get("notes", ""),
+        ]
+        worksheet.append_row(row, value_input_option="RAW")
+        return True, "Partido agregado a la agenda."
+    except Exception as exc:
+        return False, f"Error guardando el partido: {exc}"
+
+
+def load_scheduled_match(match: dict) -> None:
+    st.session_state.setup_match_name = match["name"]
+    for index, quadrant in enumerate(["q1", "q2", "q3", "q4"]):
+        st.session_state[f"setup_player_{quadrant}"] = match["players"][index]
+    st.session_state.screen = "setup"
 
 
 def resolve_google_sheet_id() -> str | None:
@@ -1375,6 +1504,80 @@ def render_history_screen() -> None:
             st.rerun()
 
 
+def render_scheduled_matches() -> None:
+    st.markdown("### Próximos partidos")
+    st.caption("Podés cargarlos acá o escribirlos en la pestaña Partidos de Google Sheets.")
+
+    matches = fetch_scheduled_matches()
+    if matches is None:
+        st.info("La agenda de Google Sheets todavía no está disponible.")
+    elif not matches:
+        st.info("No hay partidos precargados.")
+    else:
+        for match in matches:
+            when = " · ".join(value for value in [match["date"], match["time"]] if value)
+            when_label = f" · {when}" if when else ""
+            with st.container(border=True):
+                info_col, action_col = st.columns([3, 1])
+                with info_col:
+                    st.markdown(f"**{match['name']}**{when_label}")
+                    st.caption(" · ".join(match["players"]))
+                    if match["notes"]:
+                        st.caption(match["notes"])
+                with action_col:
+                    if st.button(
+                        "Cargar partido",
+                        key=f"load_scheduled_{match['row_index']}",
+                        use_container_width=True,
+                    ):
+                        load_scheduled_match(match)
+                        st.rerun()
+
+    with st.expander("Agregar partido a la agenda"):
+        with st.form("scheduled_match_form", clear_on_submit=True):
+            st.text_input("Nombre del partido", key="scheduled_match_name", placeholder="Ej. Semifinal - Club Norte")
+            date_col, time_col = st.columns(2)
+            with date_col:
+                st.text_input("Fecha", key="scheduled_date", placeholder="2026-10-03")
+            with time_col:
+                st.text_input("Hora", key="scheduled_time", placeholder="18:00")
+
+            player_col_1, player_col_2 = st.columns(2)
+            with player_col_1:
+                st.text_input("Jugador #1", key="scheduled_player_q1")
+                st.text_input("Jugador #3", key="scheduled_player_q3")
+            with player_col_2:
+                st.text_input("Jugador #2", key="scheduled_player_q2")
+                st.text_input("Jugador #4", key="scheduled_player_q4")
+            st.text_input("Notas", key="scheduled_notes", placeholder="Cancha, torneo, observaciones...")
+
+            if st.form_submit_button("Guardar partido", type="primary", use_container_width=True):
+                name = st.session_state.scheduled_match_name.strip()
+                players = [
+                    st.session_state[f"scheduled_player_{quadrant}"].strip()
+                    for quadrant in ["q1", "q2", "q3", "q4"]
+                ]
+                if not name or not all(players):
+                    st.error("Completá el nombre y los 4 jugadores.")
+                else:
+                    ok, message = save_scheduled_match(
+                        {
+                            "id": f"P-{uuid4().hex[:8].upper()}",
+                            "date": st.session_state.scheduled_date.strip(),
+                            "time": st.session_state.scheduled_time.strip(),
+                            "name": name,
+                            "players": players,
+                            "status": "Pendiente",
+                            "notes": st.session_state.scheduled_notes.strip(),
+                        }
+                    )
+                    if ok:
+                        st.success(message)
+                        st.rerun()
+                    else:
+                        st.error(message)
+
+
 def render_home_screen() -> None:
     """Pantalla de inicio principal con opciones para nuevo partido o histórico."""
     inject_court_styles()
@@ -1392,6 +1595,8 @@ def render_home_screen() -> None:
         st.markdown('<div class="brand-copy">', unsafe_allow_html=True)
         st.markdown('<div class="brand-title">Poly Stats</div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
+
+    render_scheduled_matches()
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
