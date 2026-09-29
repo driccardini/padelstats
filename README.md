@@ -62,7 +62,8 @@ También tenés que compartir la hoja con el `client_email` de la service accoun
 Desde el home podés abrir `Agregar partido a la agenda` y cargar fecha, hora,
 nombre, los 4 jugadores y notas. La app guarda esos datos en una pestaña
 separada llamada `Partidos` y permite cargar cualquier partido directamente en
-la pantalla de setup.
+la pantalla de setup. Cada partido también se puede editar o eliminar desde el
+home; eliminarlo de la agenda no borra estadísticas históricas.
 
 También podés crear esa pestaña manualmente y pegar una fila por partido con
 estos encabezados exactos:

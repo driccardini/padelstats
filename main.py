@@ -442,6 +442,12 @@ def ensure_state() -> None:
             st.session_state[key] = ""
     if "scheduled_notes" not in st.session_state:
         st.session_state.scheduled_notes = ""
+    if "scheduled_edit_row" not in st.session_state:
+        st.session_state.scheduled_edit_row = None
+    if "scheduled_edit_id" not in st.session_state:
+        st.session_state.scheduled_edit_id = ""
+    if "confirm_delete_scheduled_row" not in st.session_state:
+        st.session_state.confirm_delete_scheduled_row = None
 
 
 def inc_stat(quadrant: str, stat_key: str) -> None:
@@ -714,10 +720,30 @@ def save_scheduled_match(match: dict) -> tuple[bool, str]:
             match.get("status", "Pendiente"),
             match.get("notes", ""),
         ]
+        row_index = match.get("row_index")
+        if row_index:
+            worksheet.update(
+                f"A{row_index}:J{row_index}",
+                [row],
+                value_input_option="RAW",
+            )
+            return True, "Partido actualizado en la agenda."
+
         worksheet.append_row(row, value_input_option="RAW")
         return True, "Partido agregado a la agenda."
     except Exception as exc:
         return False, f"Error guardando el partido: {exc}"
+
+
+def delete_scheduled_match(row_index: int) -> tuple[bool, str]:
+    try:
+        worksheet = get_scheduled_matches_worksheet()
+        if worksheet is None:
+            return False, "No se pudo conectar con Google Sheets."
+        worksheet.delete_rows(row_index)
+        return True, "Partido eliminado de la agenda."
+    except Exception as exc:
+        return False, f"Error eliminando el partido: {exc}"
 
 
 def load_scheduled_match(match: dict) -> None:
@@ -725,6 +751,17 @@ def load_scheduled_match(match: dict) -> None:
     for index, quadrant in enumerate(["q1", "q2", "q3", "q4"]):
         st.session_state[f"setup_player_{quadrant}"] = match["players"][index]
     st.session_state.screen = "setup"
+
+
+def edit_scheduled_match(match: dict) -> None:
+    st.session_state.scheduled_edit_row = match["row_index"]
+    st.session_state.scheduled_edit_id = match["id"]
+    st.session_state.scheduled_date = match["date"]
+    st.session_state.scheduled_time = match["time"]
+    st.session_state.scheduled_match_name = match["name"]
+    st.session_state.scheduled_notes = match["notes"]
+    for index, quadrant in enumerate(["q1", "q2", "q3", "q4"]):
+        st.session_state[f"scheduled_player_{quadrant}"] = match["players"][index]
 
 
 def resolve_google_sheet_id() -> str | None:
@@ -1518,13 +1555,13 @@ def render_scheduled_matches() -> None:
             when = " · ".join(value for value in [match["date"], match["time"]] if value)
             when_label = f" · {when}" if when else ""
             with st.container(border=True):
-                info_col, action_col = st.columns([3, 1])
+                info_col, load_col, edit_col, delete_col = st.columns([3, 1, 1, 1])
                 with info_col:
                     st.markdown(f"**{match['name']}**{when_label}")
                     st.caption(" · ".join(match["players"]))
                     if match["notes"]:
                         st.caption(match["notes"])
-                with action_col:
+                with load_col:
                     if st.button(
                         "Cargar partido",
                         key=f"load_scheduled_{match['row_index']}",
@@ -1532,8 +1569,43 @@ def render_scheduled_matches() -> None:
                     ):
                         load_scheduled_match(match)
                         st.rerun()
+                with edit_col:
+                    if st.button(
+                        "Editar",
+                        key=f"edit_scheduled_{match['row_index']}",
+                        use_container_width=True,
+                    ):
+                        edit_scheduled_match(match)
+                        st.rerun()
+                with delete_col:
+                    if st.button(
+                        "Eliminar",
+                        key=f"delete_scheduled_{match['row_index']}",
+                        use_container_width=True,
+                    ):
+                        st.session_state.confirm_delete_scheduled_row = match["row_index"]
+                        st.rerun()
 
-    with st.expander("Agregar partido a la agenda"):
+    if st.session_state.confirm_delete_scheduled_row is not None:
+        st.warning("Esta acción elimina el partido de la agenda y no afecta sus estadísticas guardadas.")
+        confirm_col, cancel_col = st.columns(2)
+        with confirm_col:
+            if st.button("Confirmar eliminación", type="primary", use_container_width=True):
+                ok, message = delete_scheduled_match(st.session_state.confirm_delete_scheduled_row)
+                if ok:
+                    st.session_state.confirm_delete_scheduled_row = None
+                    st.success(message)
+                    st.rerun()
+                else:
+                    st.error(message)
+        with cancel_col:
+            if st.button("Cancelar eliminación", use_container_width=True):
+                st.session_state.confirm_delete_scheduled_row = None
+                st.rerun()
+
+    is_editing = st.session_state.scheduled_edit_row is not None
+    expander_title = "Editar partido" if is_editing else "Agregar partido a la agenda"
+    with st.expander(expander_title, expanded=is_editing):
         with st.form("scheduled_match_form", clear_on_submit=True):
             st.text_input("Nombre del partido", key="scheduled_match_name", placeholder="Ej. Semifinal - Club Norte")
             date_col, time_col = st.columns(2)
@@ -1551,7 +1623,8 @@ def render_scheduled_matches() -> None:
                 st.text_input("Jugador #4", key="scheduled_player_q4")
             st.text_input("Notas", key="scheduled_notes", placeholder="Cancha, torneo, observaciones...")
 
-            if st.form_submit_button("Guardar partido", type="primary", use_container_width=True):
+            submit_label = "Actualizar partido" if is_editing else "Guardar partido"
+            if st.form_submit_button(submit_label, type="primary", use_container_width=True):
                 name = st.session_state.scheduled_match_name.strip()
                 players = [
                     st.session_state[f"scheduled_player_{quadrant}"].strip()
@@ -1562,7 +1635,12 @@ def render_scheduled_matches() -> None:
                 else:
                     ok, message = save_scheduled_match(
                         {
-                            "id": f"P-{uuid4().hex[:8].upper()}",
+                            "id": (
+                                f"P-{uuid4().hex[:8].upper()}"
+                                if not is_editing
+                                else st.session_state.scheduled_edit_id
+                            ),
+                            "row_index": st.session_state.scheduled_edit_row,
                             "date": st.session_state.scheduled_date.strip(),
                             "time": st.session_state.scheduled_time.strip(),
                             "name": name,
@@ -1572,6 +1650,8 @@ def render_scheduled_matches() -> None:
                         }
                     )
                     if ok:
+                        st.session_state.scheduled_edit_row = None
+                        st.session_state.scheduled_edit_id = ""
                         st.success(message)
                         st.rerun()
                     else:
