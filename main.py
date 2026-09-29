@@ -88,11 +88,12 @@ def inject_court_styles() -> None:
                 max-width: 760px;
             }
 
-            .brand-layout [data-testid="stImage"] img {
+            [data-testid="stImage"] img {
                 aspect-ratio: 1;
                 border: 3px solid rgba(255, 255, 255, 0.9);
                 border-radius: 50%;
                 object-fit: cover;
+                max-width: 260px;
                 box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
             }
 
@@ -103,6 +104,26 @@ def inject_court_styles() -> None:
             .brand-copy .court-title {
                 font-size: clamp(2rem, 5vw, 3.8rem);
                 line-height: 1;
+            }
+
+            .brand-title {
+                color: #ffffff;
+                font-size: clamp(3rem, 9vw, 6.5rem);
+                font-weight: 900;
+                letter-spacing: 0;
+                line-height: 0.95;
+                text-align: center;
+                text-shadow: 0 5px 0 rgba(12, 69, 42, 0.65), 0 10px 24px rgba(0, 0, 0, 0.28);
+            }
+
+            .brand-title::after {
+                background: #f4d35e;
+                border-radius: 999px;
+                content: "";
+                display: block;
+                height: 6px;
+                margin: 0.8rem auto 0;
+                width: 5rem;
             }
 
             .court-subtitle {
@@ -1358,7 +1379,7 @@ def render_home_screen() -> None:
     """Pantalla de inicio principal con opciones para nuevo partido o histórico."""
     inject_court_styles()
 
-    image_path = Path(__file__).resolve().parent / "assets" / "poly-stats.jpg"
+    image_path = Path(__file__).resolve().parent / "assets" / "poly.jpeg"
     if image_path.exists():
         brand_image_col, brand_copy_col = st.columns([1, 2], vertical_alignment="center")
         with brand_image_col:
@@ -1369,7 +1390,7 @@ def render_home_screen() -> None:
 
     with title_container:
         st.markdown('<div class="brand-copy">', unsafe_allow_html=True)
-        st.markdown('<div class="court-title">🎾 Poly Stats</div>', unsafe_allow_html=True)
+        st.markdown('<div class="brand-title">Poly Stats</div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
