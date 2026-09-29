@@ -321,6 +321,18 @@ def inject_court_styles() -> None:
                 margin-bottom: 8px;
             }
 
+            .set-timer-status {
+                background: #f4d35e;
+                border: 2px solid #111111;
+                border-radius: 10px;
+                color: #111111;
+                font-size: 1.08rem;
+                font-weight: 900;
+                line-height: 1.25;
+                padding: 10px 12px;
+                text-align: center;
+            }
+
             [data-testid="stMetric"] {
                 background: rgba(255, 255, 255, 0.1);
                 border: 1px solid rgba(255, 255, 255, 0.45);
@@ -1355,12 +1367,14 @@ def render_match_toolbar() -> None:
     timer_status_col, timer_action_col = st.columns([2, 1])
     with timer_status_col:
         if timing["started_at"] is None:
-            st.info("Set sin iniciar")
+            timer_message = "Set sin iniciar"
         else:
             status = "Set en curso" if timing["ended_at"] is None else "Set terminado"
-            st.info(
-                f"{status} · Duración: {format_set_duration(get_set_duration_seconds(st.session_state.selected_set))}"
+            timer_message = (
+                f"{status} · Duración: "
+                f"{format_set_duration(get_set_duration_seconds(st.session_state.selected_set))}"
             )
+        st.markdown(f'<div class="set-timer-status">{timer_message}</div>', unsafe_allow_html=True)
     with timer_action_col:
         if timing["started_at"] is None:
             st.button("Iniciar set", on_click=start_set_timer, use_container_width=True)
