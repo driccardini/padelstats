@@ -25,11 +25,16 @@ except Exception:  # pragma: no cover - optional dependency for local run before
 
 
 STAT_KEYS = ["winner", "errores_no_forzados", "smash", "smash_winner"]
+PAIR_STAT_KEYS = ["posibilidades_quiebre", "quiebres"]
 STAT_LABELS = {
     "winner": "Winner",
     "errores_no_forzados": "Errores no forzados",
     "smash": "Smash",
     "smash_winner": "Smash winner",
+}
+PAIR_STAT_LABELS = {
+    "posibilidades_quiebre": "Posibilidades de quiebre",
+    "quiebres": "Quiebres",
 }
 
 STAT_ICONS = {
@@ -56,6 +61,10 @@ PAIR_STATS_HEADERS = [
     "Errores no forzados #2",
     "Smash #2",
     "Smash winner #2",
+    "Posibilidades de quiebre #1",
+    "Posibilidades de quiebre #2",
+    "Quiebres #1",
+    "Quiebres #2",
 ]
 SCHEDULED_MATCH_HEADERS = [
     "ID",
@@ -433,6 +442,15 @@ def ensure_state() -> None:
             for set_number in [1, 2, 3]
         }
 
+    if "pair_stats" not in st.session_state:
+        st.session_state.pair_stats = {
+            set_number: {
+                pair: {stat: 0 for stat in PAIR_STAT_KEYS}
+                for pair in ["pair1", "pair2"]
+            }
+            for set_number in [1, 2, 3]
+        }
+
     # Campos para pantalla inicial.
     if "setup_match_name" not in st.session_state:
         st.session_state.setup_match_name = ""
@@ -486,10 +504,30 @@ def dec_stat(quadrant: str, stat_key: str) -> None:
     )
 
 
+def set_active_quadrant(quadrant: str) -> None:
+    st.session_state.active_quadrant = quadrant
+
+
+def inc_pair_stat(pair: str, stat_key: str) -> None:
+    current_set = st.session_state.selected_set
+    st.session_state.pair_stats[current_set][pair][stat_key] += 1
+
+
+def dec_pair_stat(pair: str, stat_key: str) -> None:
+    current_set = st.session_state.selected_set
+    st.session_state.pair_stats[current_set][pair][stat_key] = max(
+        0,
+        st.session_state.pair_stats[current_set][pair][stat_key] - 1,
+    )
+
+
 def reset_set_stats(set_number: int) -> None:
     for quadrant in ["q1", "q2", "q3", "q4"]:
         for stat in STAT_KEYS:
             st.session_state.stats[set_number][quadrant][stat] = 0
+    for pair in ["pair1", "pair2"]:
+        for stat in PAIR_STAT_KEYS:
+            st.session_state.pair_stats[set_number][pair][stat] = 0
 
 
 def reset_match_stats() -> None:
@@ -560,6 +598,10 @@ def to_pair_sheet_row_for_set(set_number: int) -> list:
         pair_stats[1]["errores_no_forzados"],
         pair_stats[1]["smash"],
         pair_stats[1]["smash_winner"],
+        st.session_state.pair_stats[set_number]["pair1"]["posibilidades_quiebre"],
+        st.session_state.pair_stats[set_number]["pair2"]["posibilidades_quiebre"],
+        st.session_state.pair_stats[set_number]["pair1"]["quiebres"],
+        st.session_state.pair_stats[set_number]["pair2"]["quiebres"],
     ]
 
 
@@ -759,6 +801,12 @@ def save_pair_stats_to_google_sheet(spreadsheet, set_number: int) -> tuple[bool,
             if not all_values:
                 worksheet.append_row(PAIR_STATS_HEADERS, value_input_option="RAW")
                 all_values = [PAIR_STATS_HEADERS]
+            elif len(all_values[0]) < len(PAIR_STATS_HEADERS):
+                worksheet.update(
+                    "A1:P1",
+                    [PAIR_STATS_HEADERS],
+                    value_input_option="RAW",
+                )
 
             for row_index, existing in enumerate(all_values, start=1):
                 if len(existing) < 2:
@@ -772,7 +820,7 @@ def save_pair_stats_to_google_sheet(spreadsheet, set_number: int) -> tuple[bool,
 
         if target_row_index is not None:
             worksheet.update(
-                f"A{target_row_index}:L{target_row_index}",
+                f"A{target_row_index}:P{target_row_index}",
                 [row],
                 value_input_option="RAW",
             )
@@ -1033,6 +1081,9 @@ def build_set_signature(set_number: int) -> tuple:
         values.append(st.session_state.player_names[quadrant])
         for stat in STAT_KEYS:
             values.append(st.session_state.stats[set_number][quadrant][stat])
+    for pair in ["pair1", "pair2"]:
+        for stat in PAIR_STAT_KEYS:
+            values.append(st.session_state.pair_stats[set_number][pair][stat])
     return (st.session_state.match_name, set_number, *values)
 
 
@@ -1182,18 +1233,20 @@ def render_mobile_player_selector() -> None:
             key="active_q1",
             type="primary" if st.session_state.active_quadrant == "q1" else "secondary",
             use_container_width=True,
+            on_click=set_active_quadrant,
+            args=("q1",),
         ):
-            st.session_state.active_quadrant = "q1"
-            st.rerun()
+            pass
     with q2:
         if st.button(
             st.session_state.player_names["q2"],
             key="active_q2",
             type="primary" if st.session_state.active_quadrant == "q2" else "secondary",
             use_container_width=True,
+            on_click=set_active_quadrant,
+            args=("q2",),
         ):
-            st.session_state.active_quadrant = "q2"
-            st.rerun()
+            pass
 
     q3, q4 = st.columns(2)
     with q3:
@@ -1202,18 +1255,20 @@ def render_mobile_player_selector() -> None:
             key="active_q3",
             type="primary" if st.session_state.active_quadrant == "q3" else "secondary",
             use_container_width=True,
+            on_click=set_active_quadrant,
+            args=("q3",),
         ):
-            st.session_state.active_quadrant = "q3"
-            st.rerun()
+            pass
     with q4:
         if st.button(
             st.session_state.player_names["q4"],
             key="active_q4",
             type="primary" if st.session_state.active_quadrant == "q4" else "secondary",
             use_container_width=True,
+            on_click=set_active_quadrant,
+            args=("q4",),
         ):
-            st.session_state.active_quadrant = "q4"
-            st.rerun()
+            pass
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1301,6 +1356,56 @@ def render_court_view() -> None:
 def render_mobile_view() -> None:
     render_mobile_player_selector()
     render_quadrant(st.session_state.active_quadrant)
+
+
+def render_pair_stats_controls() -> None:
+    set_number = st.session_state.selected_set
+    pair_names = {
+        "pair1": f"{st.session_state.player_names['q1']} / {st.session_state.player_names['q2']}",
+        "pair2": f"{st.session_state.player_names['q3']} / {st.session_state.player_names['q4']}",
+    }
+
+    st.markdown('<div class="summary-wrap">', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="summary-title">Métricas por pareja · SET {set_number}</div>',
+        unsafe_allow_html=True,
+    )
+
+    pair_one_col, pair_two_col = st.columns(2)
+    for column, pair in [(pair_one_col, "pair1"), (pair_two_col, "pair2")]:
+        with column:
+            st.markdown(f'<div class="summary-player">{pair_names[pair]}</div>', unsafe_allow_html=True)
+            for stat in PAIR_STAT_KEYS:
+                value = st.session_state.pair_stats[set_number][pair][stat]
+                decrease_col, value_col, increase_col = st.columns([1, 3, 1])
+                with decrease_col:
+                    st.button(
+                        "−",
+                        key=f"dec_{pair}_{stat}_{set_number}",
+                        on_click=dec_pair_stat,
+                        args=(pair, stat),
+                        use_container_width=True,
+                    )
+                with value_col:
+                    st.markdown(
+                        (
+                            '<div class="stat-bubble">'
+                            f'<div class="stat-label">{PAIR_STAT_LABELS[stat]}</div>'
+                            f'<div class="stat-value">{value}</div>'
+                            "</div>"
+                        ),
+                        unsafe_allow_html=True,
+                    )
+                with increase_col:
+                    st.button(
+                        "＋",
+                        key=f"inc_{pair}_{stat}_{set_number}",
+                        on_click=inc_pair_stat,
+                        args=(pair, stat),
+                        use_container_width=True,
+                    )
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_player_summary_card(quadrant: str) -> None:
@@ -1415,6 +1520,8 @@ def render_match_screen() -> None:
         render_mobile_view()
     else:
         render_court_view()
+
+    render_pair_stats_controls()
 
     if st.session_state.last_saved_set:
         render_saved_set_summary(st.session_state.last_saved_set)
