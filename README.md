@@ -88,7 +88,8 @@ Allí se guarda una fila por partido y set: la pareja #1 suma los cuadrantes
 superiores (`Jugador #1` + `Jugador #2`) y la pareja #2 suma los inferiores
 (`Jugador #3` + `Jugador #4`). Además, cada pareja tiene su contador de
 `Posibilidades de quiebre` y `Quiebres`, que no se asignan a jugadores
-individuales.
+individuales. Cada set también registra `Inicio set`, `Fin set` y
+`Duracion set` en formato `HH h MM min SS s`.
 
 ### Columnas reales usadas en la hoja
 

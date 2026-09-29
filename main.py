@@ -4,6 +4,7 @@ import os
 import json
 import hmac
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Dict
 from uuid import uuid4
@@ -26,6 +27,7 @@ except Exception:  # pragma: no cover - optional dependency for local run before
 
 STAT_KEYS = ["winner", "errores_no_forzados", "smash", "smash_winner"]
 PAIR_STAT_KEYS = ["posibilidades_quiebre", "quiebres"]
+SET_TIME_HEADERS = ["Inicio set", "Fin set", "Duracion set"]
 STAT_LABELS = {
     "winner": "Winner",
     "errores_no_forzados": "Errores no forzados",
@@ -65,6 +67,9 @@ PAIR_STATS_HEADERS = [
     "Posibilidades de quiebre #2",
     "Quiebres #1",
     "Quiebres #2",
+    "Inicio set",
+    "Fin set",
+    "Duracion set",
 ]
 SCHEDULED_MATCH_HEADERS = [
     "ID",
@@ -451,6 +456,12 @@ def ensure_state() -> None:
             for set_number in [1, 2, 3]
         }
 
+    if "set_timing" not in st.session_state:
+        st.session_state.set_timing = {
+            set_number: {"started_at": None, "ended_at": None}
+            for set_number in [1, 2, 3]
+        }
+
     # Campos para pantalla inicial.
     if "setup_match_name" not in st.session_state:
         st.session_state.setup_match_name = ""
@@ -521,6 +532,44 @@ def dec_pair_stat(pair: str, stat_key: str) -> None:
     )
 
 
+def start_set_timer() -> None:
+    current_set = st.session_state.selected_set
+    st.session_state.set_timing[current_set] = {
+        "started_at": time.time(),
+        "ended_at": None,
+    }
+
+
+def finish_set_timer() -> None:
+    current_set = st.session_state.selected_set
+    timing = st.session_state.set_timing[current_set]
+    if timing["started_at"] is not None:
+        timing["ended_at"] = time.time()
+
+
+def get_set_duration_seconds(set_number: int) -> int | None:
+    timing = st.session_state.set_timing[set_number]
+    started_at = timing["started_at"]
+    if started_at is None:
+        return None
+    ended_at = timing["ended_at"] or time.time()
+    return max(0, int(ended_at - started_at))
+
+
+def format_set_duration(seconds: int | None) -> str:
+    if seconds is None:
+        return "Sin iniciar"
+    hours, remainder = divmod(seconds, 3600)
+    minutes, remaining_seconds = divmod(remainder, 60)
+    return f"{hours:02d} h {minutes:02d} min {remaining_seconds:02d} s"
+
+
+def format_set_timestamp(timestamp: float | None) -> str:
+    if timestamp is None:
+        return ""
+    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def reset_set_stats(set_number: int) -> None:
     for quadrant in ["q1", "q2", "q3", "q4"]:
         for stat in STAT_KEYS:
@@ -528,6 +577,10 @@ def reset_set_stats(set_number: int) -> None:
     for pair in ["pair1", "pair2"]:
         for stat in PAIR_STAT_KEYS:
             st.session_state.pair_stats[set_number][pair][stat] = 0
+    st.session_state.set_timing[set_number] = {
+        "started_at": None,
+        "ended_at": None,
+    }
 
 
 def reset_match_stats() -> None:
@@ -571,6 +624,9 @@ def to_sheet_row_for_set(set_number: int) -> list:
         q4["errores_no_forzados"],
         q4["smash"],
         q4["smash_winner"],
+        format_set_timestamp(st.session_state.set_timing[set_number]["started_at"]),
+        format_set_timestamp(st.session_state.set_timing[set_number]["ended_at"]),
+        format_set_duration(get_set_duration_seconds(set_number)),
     ]
 
 
@@ -602,6 +658,9 @@ def to_pair_sheet_row_for_set(set_number: int) -> list:
         st.session_state.pair_stats[set_number]["pair2"]["posibilidades_quiebre"],
         st.session_state.pair_stats[set_number]["pair1"]["quiebres"],
         st.session_state.pair_stats[set_number]["pair2"]["quiebres"],
+        format_set_timestamp(st.session_state.set_timing[set_number]["started_at"]),
+        format_set_timestamp(st.session_state.set_timing[set_number]["ended_at"]),
+        format_set_duration(get_set_duration_seconds(set_number)),
     ]
 
 
@@ -803,7 +862,7 @@ def save_pair_stats_to_google_sheet(spreadsheet, set_number: int) -> tuple[bool,
                 all_values = [PAIR_STATS_HEADERS]
             elif len(all_values[0]) < len(PAIR_STATS_HEADERS):
                 worksheet.update(
-                    "A1:P1",
+                    "A1:Q1",
                     [PAIR_STATS_HEADERS],
                     value_input_option="RAW",
                 )
@@ -820,7 +879,7 @@ def save_pair_stats_to_google_sheet(spreadsheet, set_number: int) -> tuple[bool,
 
         if target_row_index is not None:
             worksheet.update(
-                f"A{target_row_index}:P{target_row_index}",
+                f"A{target_row_index}:Q{target_row_index}",
                 [row],
                 value_input_option="RAW",
             )
@@ -1048,7 +1107,7 @@ def save_set_to_google_sheet(set_number: int) -> tuple[bool, str]:
 
         if target_row_index is not None:
             worksheet.update(
-                f"A{target_row_index}:V{target_row_index}",
+                f"A{target_row_index}:Y{target_row_index}",
                 [row],
                 value_input_option="RAW",
             )
@@ -1084,6 +1143,12 @@ def build_set_signature(set_number: int) -> tuple:
     for pair in ["pair1", "pair2"]:
         for stat in PAIR_STAT_KEYS:
             values.append(st.session_state.pair_stats[set_number][pair][stat])
+    values.extend(
+        [
+            st.session_state.set_timing[set_number]["started_at"],
+            st.session_state.set_timing[set_number]["ended_at"],
+        ]
+    )
     return (st.session_state.match_name, set_number, *values)
 
 
@@ -1285,6 +1350,24 @@ def render_match_toolbar() -> None:
         st.selectbox("Set activo", options=[1, 2, 3], key="selected_set")
     with c2:
         st.radio("Vista", options=["Mobile", "Cancha"], key="match_view", horizontal=True)
+
+    timing = st.session_state.set_timing[st.session_state.selected_set]
+    timer_status_col, timer_action_col = st.columns([2, 1])
+    with timer_status_col:
+        if timing["started_at"] is None:
+            st.info("Set sin iniciar")
+        else:
+            status = "Set en curso" if timing["ended_at"] is None else "Set terminado"
+            st.info(
+                f"{status} · Duración: {format_set_duration(get_set_duration_seconds(st.session_state.selected_set))}"
+            )
+    with timer_action_col:
+        if timing["started_at"] is None:
+            st.button("Iniciar set", on_click=start_set_timer, use_container_width=True)
+        elif timing["ended_at"] is None:
+            st.button("Terminar set", on_click=finish_set_timer, use_container_width=True)
+        else:
+            st.button("Reiniciar reloj", on_click=start_set_timer, use_container_width=True)
 
     c3, c4 = st.columns(2)
     with c3:
