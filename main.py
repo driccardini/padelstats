@@ -59,6 +59,14 @@ def inject_court_styles() -> None:
                 background-image:
                     linear-gradient(#3aa56a, #2c8a57);
                 background-size: 100% 100%;
+                overscroll-behavior-y: none;
+            }
+
+            html,
+            body,
+            [data-testid="stAppViewContainer"],
+            [data-testid="stMain"] {
+                overscroll-behavior-y: none;
             }
 
             .block-container {
@@ -72,6 +80,29 @@ def inject_court_styles() -> None:
                 font-size: 1.2rem;
                 letter-spacing: 0.02em;
                 margin-bottom: 0.2rem;
+            }
+
+            .brand-layout {
+                align-items: center;
+                margin: 1rem auto 0.25rem auto;
+                max-width: 760px;
+            }
+
+            .brand-layout [data-testid="stImage"] img {
+                aspect-ratio: 1;
+                border: 3px solid rgba(255, 255, 255, 0.9);
+                border-radius: 50%;
+                object-fit: cover;
+                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+            }
+
+            .brand-copy {
+                padding: 0.5rem 0;
+            }
+
+            .brand-copy .court-title {
+                font-size: clamp(2rem, 5vw, 3.8rem);
+                line-height: 1;
             }
 
             .court-subtitle {
@@ -362,6 +393,9 @@ def ensure_state() -> None:
     if "current_tab" not in st.session_state:
         st.session_state.current_tab = "Nuevo Partido"
 
+    if "confirm_clear_match" not in st.session_state:
+        st.session_state.confirm_clear_match = False
+
 
 def inc_stat(quadrant: str, stat_key: str) -> None:
     current_set = st.session_state.selected_set
@@ -385,6 +419,13 @@ def reset_set_stats(set_number: int) -> None:
 def reset_match_stats() -> None:
     for set_number in [1, 2, 3]:
         reset_set_stats(set_number)
+
+
+def clear_match_data() -> None:
+    reset_match_stats()
+    st.session_state.last_saved_set = None
+    st.session_state.autosave_signatures = {}
+    st.session_state.confirm_clear_match = False
 
 
 def to_sheet_row_for_set(set_number: int) -> list:
@@ -874,13 +915,29 @@ def render_match_toolbar() -> None:
 
     c5, c6 = st.columns(2)
     with c5:
-        if st.button("Reset partido completo", use_container_width=True):
-            reset_match_stats()
-            st.success("Partido reseteado")
-    with c6:
-        if st.button("Finalizar partido", use_container_width=True):
-            finish_match()
+        if st.button("Actualizar pantalla", use_container_width=True):
             st.rerun()
+    with c6:
+        if st.button("Blanquear estadísticas", use_container_width=True):
+            st.session_state.confirm_clear_match = True
+            st.rerun()
+
+    if st.session_state.confirm_clear_match:
+        st.warning("Se van a borrar las estadísticas de los 3 sets. Los nombres se conservarán.")
+        confirm_col, cancel_col = st.columns(2)
+        with confirm_col:
+            if st.button("Confirmar borrado", type="primary", use_container_width=True):
+                clear_match_data()
+                st.success("Estadísticas blanqueadas")
+                st.rerun()
+        with cancel_col:
+            if st.button("Cancelar borrado", use_container_width=True):
+                st.session_state.confirm_clear_match = False
+                st.rerun()
+
+    if st.button("Finalizar partido", use_container_width=True):
+        finish_match()
+        st.rerun()
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1300,12 +1357,20 @@ def render_history_screen() -> None:
 def render_home_screen() -> None:
     """Pantalla de inicio principal con opciones para nuevo partido o histórico."""
     inject_court_styles()
-    
-    st.markdown('<div class="court-title">🎾 Padel Stats</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="court-subtitle">Gestor de estadísticas de partidos de pádel</div>',
-        unsafe_allow_html=True,
-    )
+
+    image_path = Path(__file__).resolve().parent / "assets" / "poly-stats.jpg"
+    if image_path.exists():
+        brand_image_col, brand_copy_col = st.columns([1, 2], vertical_alignment="center")
+        with brand_image_col:
+            st.image(str(image_path), use_container_width=True)
+        title_container = brand_copy_col
+    else:
+        title_container = st.container()
+
+    with title_container:
+        st.markdown('<div class="brand-copy">', unsafe_allow_html=True)
+        st.markdown('<div class="court-title">🎾 Poly Stats</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
@@ -1367,7 +1432,7 @@ def render_home_screen() -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title="Padel Stats", page_icon="🎾", layout="wide")
+    st.set_page_config(page_title="Poly Stats", page_icon="🎾", layout="wide")
     ensure_state()
 
     if st.session_state.screen == "home":
