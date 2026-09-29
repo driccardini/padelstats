@@ -44,6 +44,7 @@ Crear archivo `.streamlit/secrets.toml`:
 ```toml
 google_sheet_id = "1tcyldrxv5lZl2CKaK4-1Me73IasGlLWTVK7cuup9HRY"
 google_worksheet = "Stats" # opcional. Si no está, usa la primera pestaña.
+app_password = "cambiame-por-una-clave-segura"
 
 [gcp_service_account]
 type = "service_account"
@@ -56,6 +57,13 @@ token_uri = "https://oauth2.googleapis.com/token"
 ```
 
 También tenés que compartir la hoja con el `client_email` de la service account.
+
+### Login
+
+La app requiere una contraseña antes de mostrar cualquier pantalla. Configurá
+`app_password` en `.streamlit/secrets.toml` o usá la variable de entorno
+`POLY_STATS_PASSWORD`. La sesión queda activa mientras esa pestaña del
+navegador siga abierta y se puede cerrar desde el home.
 
 ### Agenda de partidos próximos
 
@@ -74,6 +82,11 @@ ID | Fecha | Hora | Partido | Jugador #1 | Jugador #2 | Jugador #3 | Jugador #4 
 
 `ID` puede ser cualquier identificador único y `Estado` puede comenzar como
 `Pendiente`.
+
+Al guardar un set, la app actualiza también la pestaña `Estadisticas set`.
+Allí se guarda una fila por partido y set: la pareja #1 suma los cuadrantes
+superiores (`Jugador #1` + `Jugador #2`) y la pareja #2 suma los inferiores
+(`Jugador #3` + `Jugador #4`).
 
 ### Columnas reales usadas en la hoja
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+import hmac
 import time
 from pathlib import Path
 from typing import Dict
@@ -40,6 +41,22 @@ STAT_ICONS = {
 
 DEFAULT_GOOGLE_SHEET_ID = "1tcyldrxv5lZl2CKaK4-1Me73IasGlLWTVK7cuup9HRY"
 SCHEDULED_MATCHES_WORKSHEET = "Partidos"
+PAIR_STATS_WORKSHEET = "Estadisticas set"
+AUTOSAVE_INTERVAL_SECONDS = 60
+PAIR_STATS_HEADERS = [
+    "Partido",
+    "Set",
+    "Pareja #1",
+    "Pareja #2",
+    "Winners #1",
+    "Errores no forzados #1",
+    "Smash #1",
+    "Smash winner #1",
+    "Winners #2",
+    "Errores no forzados #2",
+    "Smash #2",
+    "Smash winner #2",
+]
 SCHEDULED_MATCH_HEADERS = [
     "ID",
     "Fecha",
@@ -402,6 +419,10 @@ def ensure_state() -> None:
 
     if "autosave_last_tick" not in st.session_state:
         st.session_state.autosave_last_tick = 0.0
+    if "stats_sheet_row_cache" not in st.session_state:
+        st.session_state.stats_sheet_row_cache = {}
+    if "pair_sheet_row_cache" not in st.session_state:
+        st.session_state.pair_sheet_row_cache = {}
 
     if "stats" not in st.session_state:
         st.session_state.stats = {
@@ -429,6 +450,8 @@ def ensure_state() -> None:
 
     if "confirm_clear_match" not in st.session_state:
         st.session_state.confirm_clear_match = False
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
 
     if "scheduled_date" not in st.session_state:
         st.session_state.scheduled_date = ""
@@ -510,6 +533,33 @@ def to_sheet_row_for_set(set_number: int) -> list:
         q4["errores_no_forzados"],
         q4["smash"],
         q4["smash_winner"],
+    ]
+
+
+def to_pair_sheet_row_for_set(set_number: int) -> list:
+    pair_one = [st.session_state.player_names["q1"], st.session_state.player_names["q2"]]
+    pair_two = [st.session_state.player_names["q3"], st.session_state.player_names["q4"]]
+    pair_stats = []
+    for quadrants in [["q1", "q2"], ["q3", "q4"]]:
+        totals = {stat: 0 for stat in STAT_KEYS}
+        for quadrant in quadrants:
+            for stat in STAT_KEYS:
+                totals[stat] += st.session_state.stats[set_number][quadrant][stat]
+        pair_stats.append(totals)
+
+    return [
+        st.session_state.match_name,
+        f"SET {set_number}",
+        " / ".join(pair_one),
+        " / ".join(pair_two),
+        pair_stats[0]["winner"],
+        pair_stats[0]["errores_no_forzados"],
+        pair_stats[0]["smash"],
+        pair_stats[0]["smash_winner"],
+        pair_stats[1]["winner"],
+        pair_stats[1]["errores_no_forzados"],
+        pair_stats[1]["smash"],
+        pair_stats[1]["smash_winner"],
     ]
 
 
@@ -630,6 +680,39 @@ def validate_service_account_info(info: Dict) -> tuple[bool, str]:
     return True, "ok"
 
 
+def get_app_password() -> str:
+    try:
+        configured_password = st.secrets["app_password"]
+        if str(configured_password).strip():
+            return str(configured_password)
+    except (StreamlitSecretNotFoundError, KeyError):
+        pass
+    return os.getenv("POLY_STATS_PASSWORD", "").strip()
+
+
+def render_login_screen() -> None:
+    inject_court_styles()
+    st.markdown('<div class="court-title">Poly Stats</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="court-subtitle">Ingresá la contraseña para continuar</div>',
+        unsafe_allow_html=True,
+    )
+
+    with st.form("login_form"):
+        password = st.text_input("Contraseña", type="password")
+        submitted = st.form_submit_button("Ingresar", type="primary", use_container_width=True)
+
+    if submitted:
+        configured_password = get_app_password()
+        if not configured_password:
+            st.error("El login no está configurado. Agregá app_password en secrets.toml.")
+        elif hmac.compare_digest(password, configured_password):
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("Contraseña incorrecta.")
+
+
 def get_google_spreadsheet():
     if gspread is None or Credentials is None:
         return None
@@ -650,6 +733,57 @@ def get_google_spreadsheet():
     credentials = Credentials.from_service_account_info(service_account_info, scopes=scope)
     client = gspread.authorize(credentials)
     return client.open_by_key(sheet_id)
+
+
+def save_pair_stats_to_google_sheet(spreadsheet, set_number: int) -> tuple[bool, str]:
+    try:
+        try:
+            worksheet = spreadsheet.worksheet(PAIR_STATS_WORKSHEET)
+        except gspread.WorksheetNotFound:
+            worksheet = spreadsheet.add_worksheet(
+                title=PAIR_STATS_WORKSHEET,
+                rows=1000,
+                cols=len(PAIR_STATS_HEADERS),
+            )
+            worksheet.append_row(PAIR_STATS_HEADERS, value_input_option="RAW")
+
+        row = to_pair_sheet_row_for_set(set_number)
+        target_match = str(st.session_state.match_name).strip()
+        target_set = f"SET {set_number}"
+        cache_key = (target_match, set_number)
+        target_row_index = st.session_state.pair_sheet_row_cache.get(cache_key)
+        all_values = None
+
+        if target_row_index is None:
+            all_values = worksheet.get_all_values()
+            if not all_values:
+                worksheet.append_row(PAIR_STATS_HEADERS, value_input_option="RAW")
+                all_values = [PAIR_STATS_HEADERS]
+
+            for row_index, existing in enumerate(all_values, start=1):
+                if len(existing) < 2:
+                    continue
+                if row_index == 1 and existing[0].strip().lower() == "partido":
+                    continue
+                if existing[0].strip() == target_match and existing[1].strip() == target_set:
+                    target_row_index = row_index
+                    st.session_state.pair_sheet_row_cache[cache_key] = row_index
+                    break
+
+        if target_row_index is not None:
+            worksheet.update(
+                f"A{target_row_index}:L{target_row_index}",
+                [row],
+                value_input_option="RAW",
+            )
+            return True, f"Set {set_number} actualizado por parejas."
+
+        worksheet.append_row(row, value_input_option="RAW")
+        if all_values is not None:
+            st.session_state.pair_sheet_row_cache[cache_key] = len(all_values) + 1
+        return True, f"Set {set_number} guardado por parejas."
+    except Exception as exc:
+        return False, f"Error guardando totales por pareja: {exc}"
 
 
 def get_scheduled_matches_worksheet():
@@ -840,25 +974,29 @@ def save_set_to_google_sheet(set_number: int) -> tuple[bool, str]:
 
         row = to_sheet_row_for_set(set_number)
 
-        # Upsert por Partido + Set: actualiza la fila existente si ya está.
-        all_values = worksheet.get_all_values()
         target_match = str(st.session_state.match_name).strip()
         target_set = f"SET {set_number}"
-        target_row_index = None
+        cache_key = (target_match, set_number)
+        target_row_index = st.session_state.stats_sheet_row_cache.get(cache_key)
+        all_values = None
 
-        for idx, existing in enumerate(all_values, start=1):
-            if len(existing) < 2:
-                continue
-            col_match = str(existing[0]).strip()
-            col_set = str(existing[1]).strip()
+        if target_row_index is None:
+            # Upsert por Partido + Set: la búsqueda se hace una sola vez por sesión.
+            all_values = worksheet.get_all_values()
+            for idx, existing in enumerate(all_values, start=1):
+                if len(existing) < 2:
+                    continue
+                col_match = str(existing[0]).strip()
+                col_set = str(existing[1]).strip()
 
-            # Salta encabezado típico.
-            if idx == 1 and col_match.lower() == "partido" and col_set.lower() == "set":
-                continue
+                # Salta encabezado típico.
+                if idx == 1 and col_match.lower() == "partido" and col_set.lower() == "set":
+                    continue
 
-            if col_match == target_match and col_set == target_set:
-                target_row_index = idx
-                break
+                if col_match == target_match and col_set == target_set:
+                    target_row_index = idx
+                    st.session_state.stats_sheet_row_cache[cache_key] = idx
+                    break
 
         if target_row_index is not None:
             worksheet.update(
@@ -868,6 +1006,12 @@ def save_set_to_google_sheet(set_number: int) -> tuple[bool, str]:
             )
         else:
             worksheet.append_row(row, value_input_option="RAW")
+            if all_values is not None:
+                st.session_state.stats_sheet_row_cache[cache_key] = len(all_values) + 1
+
+        pair_ok, pair_message = save_pair_stats_to_google_sheet(spreadsheet, set_number)
+        if not pair_ok:
+            return False, pair_message
     except Exception as exc:
         return False, f"Error guardando en Google Sheets: {exc}"
 
@@ -878,9 +1022,9 @@ def save_set_to_google_sheet(set_number: int) -> tuple[bool, str]:
         )
 
     if target_row_index is not None:
-        return True, f"Set {set_number} actualizado en Google Sheets (fila {target_row_index})"
+        return True, f"Set {set_number} actualizado en Google Sheets y Estadisticas set (fila {target_row_index})"
 
-    return True, f"Set {set_number} guardado en Google Sheets (nueva fila)"
+    return True, f"Set {set_number} guardado en Google Sheets y Estadisticas set (nueva fila)"
 
 
 def build_set_signature(set_number: int) -> tuple:
@@ -893,7 +1037,11 @@ def build_set_signature(set_number: int) -> tuple:
 
 
 def run_silent_autosave() -> None:
-    # No muestra mensajes en UI. Guarda solo si cambió el set activo.
+    # No muestra mensajes en UI. Guarda solo si cambió el set activo y pasó el intervalo.
+    now = time.time()
+    if now - st.session_state.autosave_last_tick < AUTOSAVE_INTERVAL_SECONDS:
+        return
+
     set_number = st.session_state.selected_set
     signature = build_set_signature(set_number)
     saved_signature = st.session_state.autosave_signatures.get(set_number)
@@ -903,7 +1051,7 @@ def run_silent_autosave() -> None:
     ok, _ = save_set_to_google_sheet(set_number)
     if ok:
         st.session_state.autosave_signatures[set_number] = signature
-    st.session_state.autosave_last_tick = time.time()
+    st.session_state.autosave_last_tick = now
 
 
 def start_match() -> tuple[bool, str]:
@@ -1089,13 +1237,14 @@ def render_match_toolbar() -> None:
             reset_set_stats(st.session_state.selected_set)
             st.success("Set reseteado")
     with c4:
-        if st.button("Guardar set en Google Sheets", use_container_width=True):
+        if st.button("Cerrar y guardar set", use_container_width=True):
             ok, msg = save_set_to_google_sheet(st.session_state.selected_set)
             if ok:
                 st.session_state.last_saved_set = st.session_state.selected_set
                 st.session_state.autosave_signatures[st.session_state.selected_set] = build_set_signature(
                     st.session_state.selected_set
                 )
+                st.session_state.autosave_last_tick = time.time()
                 st.success(msg)
             else:
                 st.warning(msg)
@@ -1255,7 +1404,7 @@ def render_match_screen() -> None:
 
     if hasattr(st, "fragment"):
 
-        @st.fragment(run_every="10s")
+        @st.fragment(run_every="60s")
         def autosave_fragment() -> None:
             if st.session_state.screen == "match":
                 run_silent_autosave()
@@ -1662,6 +1811,10 @@ def render_home_screen() -> None:
     """Pantalla de inicio principal con opciones para nuevo partido o histórico."""
     inject_court_styles()
 
+    if st.button("Cerrar sesión", key="logout_button"):
+        st.session_state.authenticated = False
+        st.rerun()
+
     image_path = Path(__file__).resolve().parent / "assets" / "poly.jpeg"
     if image_path.exists():
         brand_image_col, brand_copy_col = st.columns([1, 2], vertical_alignment="center")
@@ -1740,6 +1893,10 @@ def render_home_screen() -> None:
 def main() -> None:
     st.set_page_config(page_title="Poly Stats", page_icon="🎾", layout="wide")
     ensure_state()
+
+    if not st.session_state.authenticated:
+        render_login_screen()
+        st.stop()
 
     if st.session_state.screen == "home":
         render_home_screen()
