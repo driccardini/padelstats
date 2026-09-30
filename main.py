@@ -367,13 +367,22 @@ def inject_court_styles() -> None:
                 line-height: 1;
             }
 
+            .stat-number-row {
+                align-items: baseline;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 5px;
+                justify-content: center;
+                width: 100%;
+            }
+
             .previous-stat-value {
                 color: #c3d0c8;
-                font-size: 0.72rem;
+                font-size: 0.64rem;
                 font-weight: 600;
                 line-height: 1.1;
-                margin-top: 4px;
                 opacity: 0.78;
+                white-space: nowrap;
             }
 
             [data-testid="stMetricLabel"],
@@ -1259,11 +1268,10 @@ def render_quadrant(quadrant: str) -> None:
     for stat in STAT_KEYS:
         label = STAT_LABELS[stat]
         value = player_stats[stat]
-        previous_value = (
-            st.session_state.stats[set_number - 1][quadrant][stat]
-            if set_number > 1
-            else None
-        )
+        previous_values = [
+            (previous_set, st.session_state.stats[previous_set][quadrant][stat])
+            for previous_set in range(1, set_number)
+        ]
         c1, c2, c3 = st.columns([1, 2, 1])
         with c1:
             st.button(
@@ -1278,12 +1286,12 @@ def render_quadrant(quadrant: str) -> None:
                 (
                     '<div class="stat-bubble">'
                     f'<div class="stat-label">{label}</div>'
-                    f'<div class="stat-value">{value}</div>'
-                    + (
-                        f'<div class="previous-stat-value">SET {set_number - 1}: {previous_value}</div>'
-                        if previous_value is not None
-                        else ""
+                    f'<div class="stat-number-row"><span class="stat-value">{value}</span>'
+                    + "".join(
+                        f'<span class="previous-stat-value">S{previous_set}: {previous_value}</span>'
+                        for previous_set, previous_value in previous_values
                     )
+                    + "</div>"
                     + "</div>"
                 ),
                 unsafe_allow_html=True,
@@ -1517,11 +1525,10 @@ def render_pair_stats_controls() -> None:
             st.markdown(f'<div class="summary-player">{pair_names[pair]}</div>', unsafe_allow_html=True)
             for stat in PAIR_STAT_KEYS:
                 value = st.session_state.pair_stats[set_number][pair][stat]
-                previous_value = (
-                    st.session_state.pair_stats[set_number - 1][pair][stat]
-                    if set_number > 1
-                    else None
-                )
+                previous_values = [
+                    (previous_set, st.session_state.pair_stats[previous_set][pair][stat])
+                    for previous_set in range(1, set_number)
+                ]
                 decrease_col, value_col, increase_col = st.columns([1, 3, 1])
                 with decrease_col:
                     st.button(
@@ -1536,12 +1543,12 @@ def render_pair_stats_controls() -> None:
                         (
                             '<div class="stat-bubble">'
                             f'<div class="stat-label">{PAIR_STAT_LABELS[stat]}</div>'
-                            f'<div class="stat-value">{value}</div>'
-                            + (
-                                f'<div class="previous-stat-value">SET {set_number - 1}: {previous_value}</div>'
-                                if previous_value is not None
-                                else ""
+                            f'<div class="stat-number-row"><span class="stat-value">{value}</span>'
+                            + "".join(
+                                f'<span class="previous-stat-value">S{previous_set}: {previous_value}</span>'
+                                for previous_set, previous_value in previous_values
                             )
+                            + "</div>"
                             + "</div>"
                         ),
                         unsafe_allow_html=True,
