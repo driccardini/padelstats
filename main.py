@@ -367,6 +367,15 @@ def inject_court_styles() -> None:
                 line-height: 1;
             }
 
+            .previous-stat-value {
+                color: #c3d0c8;
+                font-size: 0.72rem;
+                font-weight: 600;
+                line-height: 1.1;
+                margin-top: 4px;
+                opacity: 0.78;
+            }
+
             [data-testid="stMetricLabel"],
             [data-testid="stMetricValue"] {
                 text-align: center;
@@ -853,6 +862,11 @@ def get_google_spreadsheet():
     return client.open_by_key(sheet_id)
 
 
+def get_sheet_row_range(row_index: int, values: list) -> str:
+    last_cell = gspread.utils.rowcol_to_a1(row_index, len(values))
+    return f"A{row_index}:{last_cell}"
+
+
 def save_pair_stats_to_google_sheet(spreadsheet, set_number: int) -> tuple[bool, str]:
     try:
         try:
@@ -864,6 +878,9 @@ def save_pair_stats_to_google_sheet(spreadsheet, set_number: int) -> tuple[bool,
                 cols=len(PAIR_STATS_HEADERS),
             )
             worksheet.append_row(PAIR_STATS_HEADERS, value_input_option="RAW")
+
+        if worksheet.col_count < len(PAIR_STATS_HEADERS):
+            worksheet.add_cols(len(PAIR_STATS_HEADERS) - worksheet.col_count)
 
         row = to_pair_sheet_row_for_set(set_number)
         target_match = str(st.session_state.match_name).strip()
@@ -879,7 +896,7 @@ def save_pair_stats_to_google_sheet(spreadsheet, set_number: int) -> tuple[bool,
                 all_values = [PAIR_STATS_HEADERS]
             elif len(all_values[0]) < len(PAIR_STATS_HEADERS):
                 worksheet.update(
-                    "A1:Q1",
+                    get_sheet_row_range(1, PAIR_STATS_HEADERS),
                     [PAIR_STATS_HEADERS],
                     value_input_option="RAW",
                 )
@@ -896,7 +913,7 @@ def save_pair_stats_to_google_sheet(spreadsheet, set_number: int) -> tuple[bool,
 
         if target_row_index is not None:
             worksheet.update(
-                f"A{target_row_index}:Q{target_row_index}",
+                get_sheet_row_range(target_row_index, row),
                 [row],
                 value_input_option="RAW",
             )
@@ -1242,6 +1259,11 @@ def render_quadrant(quadrant: str) -> None:
     for stat in STAT_KEYS:
         label = STAT_LABELS[stat]
         value = player_stats[stat]
+        previous_value = (
+            st.session_state.stats[set_number - 1][quadrant][stat]
+            if set_number > 1
+            else None
+        )
         c1, c2, c3 = st.columns([1, 2, 1])
         with c1:
             st.button(
@@ -1257,7 +1279,12 @@ def render_quadrant(quadrant: str) -> None:
                     '<div class="stat-bubble">'
                     f'<div class="stat-label">{label}</div>'
                     f'<div class="stat-value">{value}</div>'
-                    "</div>"
+                    + (
+                        f'<div class="previous-stat-value">SET {set_number - 1}: {previous_value}</div>'
+                        if previous_value is not None
+                        else ""
+                    )
+                    + "</div>"
                 ),
                 unsafe_allow_html=True,
             )
@@ -1490,6 +1517,11 @@ def render_pair_stats_controls() -> None:
             st.markdown(f'<div class="summary-player">{pair_names[pair]}</div>', unsafe_allow_html=True)
             for stat in PAIR_STAT_KEYS:
                 value = st.session_state.pair_stats[set_number][pair][stat]
+                previous_value = (
+                    st.session_state.pair_stats[set_number - 1][pair][stat]
+                    if set_number > 1
+                    else None
+                )
                 decrease_col, value_col, increase_col = st.columns([1, 3, 1])
                 with decrease_col:
                     st.button(
@@ -1505,7 +1537,12 @@ def render_pair_stats_controls() -> None:
                             '<div class="stat-bubble">'
                             f'<div class="stat-label">{PAIR_STAT_LABELS[stat]}</div>'
                             f'<div class="stat-value">{value}</div>'
-                            "</div>"
+                            + (
+                                f'<div class="previous-stat-value">SET {set_number - 1}: {previous_value}</div>'
+                                if previous_value is not None
+                                else ""
+                            )
+                            + "</div>"
                         ),
                         unsafe_allow_html=True,
                     )
