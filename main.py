@@ -602,8 +602,13 @@ def reset_match_stats() -> None:
 
 def clear_match_data() -> None:
     reset_match_stats()
+    st.session_state.set_timing = {
+        set_number: {"started_at": None, "ended_at": None}
+        for set_number in [1, 2, 3]
+    }
     st.session_state.last_saved_set = None
     st.session_state.autosave_signatures = {}
+    st.session_state.autosave_last_tick = 0.0
     st.session_state.confirm_clear_match = False
 
 
@@ -1350,19 +1355,7 @@ def render_mobile_player_selector() -> None:
     st.markdown("</div>", unsafe_allow_html=True)
 
 
-def render_match_toolbar() -> None:
-    st.markdown('<div class="match-toolbar">', unsafe_allow_html=True)
-    st.markdown(
-        f'<div class="match-meta">{st.session_state.match_name} | ID: {st.session_state.match_id}</div>',
-        unsafe_allow_html=True,
-    )
-
-    c1, c2 = st.columns(2)
-    with c1:
-        st.selectbox("Set activo", options=[1, 2, 3], key="selected_set")
-    with c2:
-        st.radio("Vista", options=["Mobile", "Cancha"], key="match_view", horizontal=True)
-
+def render_set_timer_controls() -> None:
     timing = st.session_state.set_timing[st.session_state.selected_set]
     timer_status_col, timer_action_col = st.columns([2, 1])
     with timer_status_col:
@@ -1382,6 +1375,29 @@ def render_match_toolbar() -> None:
             st.button("Terminar set", on_click=finish_set_timer, use_container_width=True)
         else:
             st.button("Reiniciar reloj", on_click=start_set_timer, use_container_width=True)
+
+
+def render_match_toolbar() -> None:
+    st.markdown('<div class="match-toolbar">', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="match-meta">{st.session_state.match_name} | ID: {st.session_state.match_id}</div>',
+        unsafe_allow_html=True,
+    )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.selectbox("Set activo", options=[1, 2, 3], key="selected_set")
+    with c2:
+        st.radio("Vista", options=["Mobile", "Cancha"], key="match_view", horizontal=True)
+
+    if hasattr(st, "fragment"):
+        @st.fragment(run_every="1s")
+        def set_timer_fragment() -> None:
+            render_set_timer_controls()
+
+        set_timer_fragment()
+    else:
+        render_set_timer_controls()
 
     c3, c4 = st.columns(2)
     with c3:
