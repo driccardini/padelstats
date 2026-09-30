@@ -368,12 +368,20 @@ def inject_court_styles() -> None:
             }
 
             .stat-number-row {
-                align-items: baseline;
+                align-items: center;
                 display: flex;
-                flex-wrap: wrap;
-                gap: 5px;
+                flex-wrap: nowrap;
+                gap: 8px;
                 justify-content: center;
                 width: 100%;
+            }
+
+            .previous-stat-stack {
+                align-items: flex-start;
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+                justify-content: center;
             }
 
             .previous-stat-value {
@@ -1287,9 +1295,15 @@ def render_quadrant(quadrant: str) -> None:
                     '<div class="stat-bubble">'
                     f'<div class="stat-label">{label}</div>'
                     f'<div class="stat-number-row"><span class="stat-value">{value}</span>'
-                    + "".join(
-                        f'<span class="previous-stat-value">S{previous_set}: {previous_value}</span>'
-                        for previous_set, previous_value in previous_values
+                    + (
+                        '<span class="previous-stat-stack">'
+                        + "".join(
+                            f'<span class="previous-stat-value">S{previous_set}: {previous_value}</span>'
+                            for previous_set, previous_value in previous_values
+                        )
+                        + "</span>"
+                        if previous_values
+                        else ""
                     )
                     + "</div>"
                     + "</div>"
@@ -1544,9 +1558,15 @@ def render_pair_stats_controls() -> None:
                             '<div class="stat-bubble">'
                             f'<div class="stat-label">{PAIR_STAT_LABELS[stat]}</div>'
                             f'<div class="stat-number-row"><span class="stat-value">{value}</span>'
-                            + "".join(
-                                f'<span class="previous-stat-value">S{previous_set}: {previous_value}</span>'
-                                for previous_set, previous_value in previous_values
+                            + (
+                                '<span class="previous-stat-stack">'
+                                + "".join(
+                                    f'<span class="previous-stat-value">S{previous_set}: {previous_value}</span>'
+                                    for previous_set, previous_value in previous_values
+                                )
+                                + "</span>"
+                                if previous_values
+                                else ""
                             )
                             + "</div>"
                             + "</div>"
